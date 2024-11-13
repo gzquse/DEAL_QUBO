@@ -1,1 +1,32 @@
+`pip install -r requirements.txt`
+
 `./pl_sum.py -p a -Y`
+
+## For MVRP D-Wave quantum annealing:
+
+
+2. Configure D-Wave credentials:
+   - Sign up for a D-Wave Leap account at https://cloud.dwavesys.com/leap/
+   - Install and configure D-Wave CLI:
+     ```
+     dwave config create --full
+     ```
+   - Follow prompts to enter your API token
+
+3. Run MVRP solver:
+   ```
+   cd mvrp
+   dwave solvers  --list --all
+   python app.py
+   ```
+
+   Optional arguments:
+   - `--vehicles`: Number of vehicles (default: 3)
+   - `--customers`: Number of customer locations (default: 10) 
+   - `--annealing-time`: Annealing time in microseconds (default: 20)
+   - `--num-reads`: Number of samples to collect (default: 1000)
+
+4. Results will be saved to `results/` directory including:
+   - Solution visualization
+   - Route assignments
+   - Computation statistics
