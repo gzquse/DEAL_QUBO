@@ -18,7 +18,7 @@ def simulate_time(lib, circuit, setup, qubits):
 
 # Circuit types and computational setups
 circuit_types = ['Heisenberg Dynamics', 'Random Quantum Circuit', 'Quantum Fourier Transform']
-setups = ['Single-thread', 'Multithread', 'GPU']
+setups = ['CPU Multithread', 'QPU', 'GPU']
 
 # Create a 3x3 grid of subplots
 fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(18, 15), sharex=True, sharey=True)
