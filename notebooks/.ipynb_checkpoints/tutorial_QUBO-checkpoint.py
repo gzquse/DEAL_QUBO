@@ -410,7 +410,7 @@ ax.plot(betas, label=r"$\beta_i$", marker="o", markersize=8, markeredgecolor="bl
 ax.plot(gammas, label=r"$\gamma_i$", marker="o", markersize=8, markeredgecolor="black")
 ax.set_xlabel("i", fontsize=18)
 ax.legend()
-fig.savefig("openqaoa.png")
+fig.show()
 
 ######################################################################
 #
@@ -521,67 +521,6 @@ print(
 # tiny improvement.
 #
 
-######################################################################
-# Unbalanced penalization (An alternative to slack variables)
-# -----------------------------------------------------------
-#
-# Unbalanced penalization is a function characterized by a larger penalty when the inequality
-# constraint is not achieved than when it is. So we have to modify Eq. 7 to include a linear term in
-# the following way:
-#
-# .. math:: \min_{x,s} \left(f(x) + p(x,s)\right) = \min_{x,s} \left(-\sum_i v_i x_i - \lambda_1 \left(\sum_i w_i x_i - W\right) + \lambda_2 \left(\sum_i w_i x_i - W\right)^2\right)\tag{14}.
-#
-# where :math:`\lambda_{1,2}` are again penalty coefficients. Here `[2] <https://arxiv.org/abs/2211.13914>`__ and `[3] <https://arxiv.org/pdf/2305.18757.pdf>`__ some details about unbalanced penalization. 
-# The method is already implemented in `OpenQAOA <https://openqaoa.entropicalabs.com/>`__ and `D-Wave Ocean <https://docs.ocean.dwavesys.com/en/stable/>`__ so we don't have to code it ourselves. **The cliffnotes are
-# that you don’t need slack variables for the inequality constraints anymore using this approach**.
-#
-
-from openqaoa.problems import FromDocplex2IsingModel
-from docplex.mp.model import Model
-
-
-def Knapsack(values, weights, maximum_weight):
-    """Create a docplex model of the problem. (Docplex is a classical solver from IBM)"""
-    n_items = len(values)
-    mdl = Model()
-    x = mdl.binary_var_list(range(n_items), name="x")
-    cost = -mdl.sum(x[i] * values[i] for i in range(n_items))
-    mdl.minimize(cost)
-    mdl.add_constraint(mdl.sum(x[i] * weights[i] for i in range(n_items)) <= maximum_weight)
-    return mdl
-
-
-# Docplex model, we need to convert our problem in this format to use the unbalanced penalization approach
-mdl = Knapsack(values_list, weights_list, maximum_weight)
-lambda_1, lambda_2 = (
-    0.96,
-    0.0371,
-)  # Parameters of the unbalanced penalization function (They are in the main paper)
-ising_hamiltonian = FromDocplex2IsingModel(
-    mdl,
-    unbalanced_const=True,
-    strength_ineq=[lambda_1, lambda_2],  # https://arxiv.org/abs/2211.13914
-).ising_model
-
-h_new = {
-    tuple(i): w for i, w in zip(ising_hamiltonian.terms, ising_hamiltonian.weights) if len(i) == 1
-}
-J_new = {
-    tuple(i): w for i, w in zip(ising_hamiltonian.terms, ising_hamiltonian.weights) if len(i) == 2
-}
-
-samples_unbalanced = samples_dict(
-    qaoa_circuit(gammas, betas, h_new, J_new, num_qubits=n_items), n_items
-)
-values_unbalanced = {
-    sum_values(sample_i, values_list): count
-    for sample_i, count in samples_unbalanced.items()
-    if sum_weight(sample_i, weights_list) <= maximum_weight
-}  # saving only the solutions that fulfill the constraint
-
-print(
-    f"The number of solutions using unbalanced penalization is {samples_unbalanced[opt_str]} out of {shots}"
-)
 
 ######################################################################
 # We have improved the QAOA solution by encoding our QUBO wisely, with almost 2000 out of the 5000 samples
@@ -613,7 +552,7 @@ ax.set_yscale("log")
 ax.legend()
 ax.set_ylabel("counts")
 ax.set_xlabel("values")
-fig.savefig("openqaoa_unbalanced.png")
+fig.show()
 
 ######################################################################
 # Quantum Annealing Solution
@@ -653,23 +592,22 @@ bqm["unbalanced"].add_linear_inequality_constraint(
 bqm["unbalanced"].relabel_variables({i: f"x_{i}" for i in range(bqm["unbalanced"].num_variables)})
 
 # If you have an account you can execute the following code, otherwise read the file.
-account = True
+account = False
 df = {}
 if account:
     # Replace with your client information
-    # sampler = DWaveSampler(region="eu-central-1")
-    sampler = DWaveSampler(region="na-west-1")
+    sampler = DWaveSampler(region="eu-central-1")
     sampler_qpu = EmbeddingComposite(sampler)
     for method in ["slack", "unbalanced"]:
         samples = sampler_qpu.sample(bqm[method], num_reads=5000)  # Executing on real hardware
         df[method] = (
             samples.to_pandas_dataframe().sort_values("energy").reset_index(drop=True)
         )  # Converting the sampling information and sort it by cost
-        df[method].to_json(f"out/dwave_results_{method}.json")  # save the results
+        df[method].to_json(f"QUBO/dwave_results_{method}.json")  # save the results
 else:
     df = {}
     for method in ["slack", "unbalanced"]:
-        df[method] = pd.read_json(f"out/dwave_results_{method}.json")
+        df[method] = pd.read_json(f"QUBO/dwave_results_{method}.json")
         # Loading the data from an execution on D-Wave Advantage
 
 
@@ -708,7 +646,7 @@ ax.set_yscale("log")
 ax.legend()
 ax.set_ylabel("counts")
 ax.set_xlabel("value")
-fig.savefig("dwave_unbalanced.png")
+fig.show()
 
 ######################################################################
 # Conclusion
