@@ -1,0 +1,9 @@
+numpy
+pennylane
+matplotlib
+openqaoa
+docplex
+dwave-system
+dwave-cloud-client
+dimod
+pandas
