@@ -10,3 +10,7 @@ pip install --user -r .\requirements.txt
 dwave auth login
 dwave auth get
 dwave setup --auth
+
+# HPCC
+
+. $HOME/conda/etc/profile.d/conda.sh
