@@ -40,3 +40,8 @@
 shifter --image=nersc/pytorch:24.06.01 \
     $SCRATCH/qml_env -m ipykernel install \
     --prefix $SCRATCH/qml_env --name qml_env --display-name qml_env
+
+
+# latest qiskit
+IMG=gzquse/qiskit-gpu:p1
+podman-hpc run -it --gpu -e DISPLAY  -v $SCRATCH/QML_2025:$QML_2025 -e SCRATCH  $IMG  bash
