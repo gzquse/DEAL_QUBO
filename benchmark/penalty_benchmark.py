@@ -116,7 +116,7 @@ def define_qaoa_problem(args, method="hybrid"):
     qaoa = QAOA()
     device_local = create_device(location='local', name='qiskit.shot_simulator')
     qaoa_descriptor = QAOADescriptor(cost_hamiltonian = objective_hamiltonian, mixer_block = mix_hamiltonian, p=1)
-    backend_local = get_qaoa_backend(qaoa_descriptor, device_local, n_shots=500)
+    backend_local = get_qaoa_backend(qaoa_descriptor, device_local, n_shots=2000)
     #To create a Variational Parameter Class with the Standard Parameterisation and Random Initialisation
     variate_params = create_qaoa_variational_params(qaoa_descriptor = qaoa_descriptor, params_type = 'standard', init_type = 'rand')
     optimizer = get_optimizer(backend_local, variate_params, {'method': 'cobyla',
