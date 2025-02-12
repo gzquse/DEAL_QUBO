@@ -140,7 +140,7 @@ def benchmark(args, method):
     qaoa.optimize()
     # result = qaoa.get_results()
     result = qaoa.qaoa_result.most_probable_states
-    opt_results = qaoa.qaoa_result
+ qaoa_descriptor   opt_results = qaoa.qaoa_result
     # print the cost history
     fig, ax = opt_results.plot_cost()
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
