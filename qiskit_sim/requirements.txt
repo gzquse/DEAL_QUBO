@@ -1,0 +1,6 @@
+qiskit
+qiskit_ibm_runtime
+matplotlib
+networkx
+qiskit_optimization
+pylatexenc
