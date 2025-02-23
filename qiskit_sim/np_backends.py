@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-import argparse
+import yaml
 import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
+from PlotterBackbone import PlotterBackbone
+import argparse
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
 from PlotterBackbone import PlotterBackbone
 
@@ -22,64 +26,14 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit.transpiler import CouplingMap, Layout
 from qiskit.providers.fake_provider import GenericBackendV2
 
-# backends
-# FakeAlgiers
-#     FakeAlmadenV2
-#     FakeArmonkV2
-#     FakeAthensV2
-#     FakeAuckland
-#     FakeBelemV2
-#     FakeBoeblingenV2
-#     FakeBogotaV2
-#     FakeBrisbane
-#     FakeBrooklynV2
-#     FakeBurlingtonV2
-#     FakeCairoV2
-#     FakeCambridgeV2
-#     FakeCasablancaV2
-#     FakeCusco
-#     FakeEssexV2
-#     FakeFez
-#     FakeGeneva
-#     FakeGuadalupeV2
-#     FakeHanoiV2
-#     FakeJakartaV2
-#     FakeJohannesburgV2
-#     FakeKawasaki
-#     FakeKolkataV2
-#     FakeKyiv
-#     FakeKyoto
-#     FakeLagosV2
-#     FakeLimaV2
-#     FakeFractionalBackend
-#     FakeLondonV2
-#     FakeManhattanV2
-#     FakeManilaV2
-#     FakeMarrakesh
-#     FakeMelbourneV2
-#     FakeMontrealV2
-#     FakeMumbaiV2
-#     FakeNairobiV2
-#     FakeOsaka
-#     FakeOslo
-#     FakeOurenseV2
-#     FakeParisV2
-#     FakePeekskill
-#     FakePerth
-#     FakePrague
-#     FakePoughkeepsieV2
-#     FakeQuebec
-#     FakeQuitoV2
-#     FakeRochesterV2
-#     FakeRomeV2
 from qiskit_ibm_runtime.fake_provider import FakeTorino, FakeFez, FakeMarrakesh
+from datetime import datetime
 
 #...!...!..................
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v","--verbosity",type=int,choices=[0, 1, 2],help="increase output verbosity", default=1, dest='verb')
     parser.add_argument( "-Y","--noXterm", dest='noXterm',  action='store_false', default=True, help="enables X-term for interactive mode")
-
     parser.add_argument("-p", "--showPlots",  default='b', nargs='+',help="abc-string listing shown plots")
     parser.add_argument("-m", "--penMed", choices=["X", "X2", "hybrid"], default="hybrid",help='hamiltonian method')
     parser.add_argument("--outPath",default='out/',help="all outputs from experiment")
@@ -87,13 +41,23 @@ def get_parser():
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
     args = parser.parse_args()
-    # make arguments  more flexible
     
     for arg in vars(args):  print( 'myArg:',arg, getattr(args, arg))
     assert os.path.exists(args.outPath)
     args.showPlots=''.join(args.showPlots)
-
     return args
+
+# Read backend configuration from the YAML file
+def read_config():
+    with open("backend_config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+    return config.get("backend", "FakeTorino")  # Default to FakeTorino
+
+# Read the backend name from config file
+backend_name = read_config()
+
+# Dynamically load the backend class using the name from the config
+backend = getattr(sys.modules[__name__], backend_name)()
 
 def draw_graph(G, colors, pos):
     default_axes = plt.axes(frameon=True)
@@ -101,14 +65,12 @@ def draw_graph(G, colors, pos):
     edge_labels = nx.get_edge_attributes(G, "weight")
     nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=edge_labels)
 
-
 def compute_max_cut(args):
     # Generating a graph of 4 nodes
     n = 4  # Number of nodes in graph
     G = nx.Graph()
     G.add_nodes_from(np.arange(0, n, 1))
     elist = [(0, 1, 1.0), (0, 2, 1.0), (0, 3, 1.0), (1, 2, 1.0), (2, 3, 1.0)]
-    # tuple is (i,j,weight) where (i,j) is the edge
     G.add_weighted_edges_from(elist)
 
     colors = ["r" for node in G.nodes()]
@@ -134,21 +96,20 @@ def compute_max_cut(args):
 
     # solving Quadratic Program using exact classical eigensolver
     exact = MinimumEigenOptimizer(NumPyMinimumEigensolver())
-    result = exact.solve(qp)
-    print(result.prettyprint())
+    exact_result = exact.solve(qp)
+    print(exact_result.prettyprint())
 
     # Making the Hamiltonian in its full form and getting the lowest eigenvalue and eigenvector
     ee = NumPyMinimumEigensolver()
-    result = ee.compute_minimum_eigenvalue(qubitOp)
+    ee_result = ee.compute_minimum_eigenvalue(qubitOp)
 
-    x = max_cut.sample_most_likely(result.eigenstate)
-    print("energy:", result.eigenvalue.real)
-    print("max-cut objective:", result.eigenvalue.real + offset)
-    print("solution:", x)
-    print("solution objective:", qp.objective.evaluate(x))
+    x_exact = max_cut.sample_most_likely(ee_result.eigenstate)
+    print("energy:", ee_result.eigenvalue.real)
+    print("max-cut objective:", ee_result.eigenvalue.real + offset)
+    print("solution:", x_exact)
+    print("solution objective:", qp.objective.evaluate(x_exact))
 
-    colors = ["r" if x[i] == 0 else "c" for i in range(n)]
-    # draw_graph(G, colors, pos)
+    colors = ["r" if x_exact[i] == 0 else "c" for i in range(n)]
 
     algorithm_globals.random_seed = 123
     seed = 10598
@@ -159,59 +120,70 @@ def compute_max_cut(args):
     vqe = SamplingVQE(sampler=Sampler(), ansatz=ry, optimizer=optimizer)
 
     # run SamplingVQE
-    result = vqe.compute_minimum_eigenvalue(qubitOp)
+    vqe_result = vqe.compute_minimum_eigenvalue(qubitOp)
 
-    # print results
-    x = max_cut.sample_most_likely(result.eigenstate)
-    print("energy:", result.eigenvalue.real)
-    print("time:", result.optimizer_time)
-    print("max-cut objective:", result.eigenvalue.real + offset)
-    print("solution:", x)
-    print("solution objective:", qp.objective.evaluate(x))
+    # print results can be commented out if not needed
+    x_vqe = max_cut.sample_most_likely(vqe_result.eigenstate)
+    print("energy:", vqe_result.eigenvalue.real)
+    print("time:", vqe_result.optimizer_time)
+    print("max-cut objective:", vqe_result.eigenvalue.real + offset)
+    print("solution:", x_vqe)
+    print("solution objective:", qp.objective.evaluate(x_vqe))
 
     # plot results
-    colors = ["r" if x[i] == 0 else "c" for i in range(n)]
+    colors = ["r" if x_vqe[i] == 0 else "c" for i in range(n)]
 
-    # TODO
-    # save the last graph 
-    #draw_graph(G, colors, pos)
+    # Save the last graph
+    draw_graph(G, colors, pos)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plt.savefig(os.path.join(args.outPath, f'maxcut_graph_{timestamp}.png'))
+    plt.close()
 
-    return vqe
+    # Collect parameters for YAML
+    params = {
+        'weight_matrix': w.tolist(),
+        'offset': float(offset),
+        'ising_hamiltonian': str(qubitOp),
+        'exact_solution': exact_result.prettyprint(),  # Only use prettyprint() for exact result
+        'exact_energy': float(ee_result.eigenvalue.real),
+        'exact_maxcut_objective': float(ee_result.eigenvalue.real + offset),
+        'exact_solution_vector': x_exact.tolist(),
+        'exact_solution_objective': float(qp.objective.evaluate(x_exact)),
+        'vqe_energy': float(vqe_result.eigenvalue.real),
+        'vqe_time': float(vqe_result.optimizer_time),
+        'vqe_maxcut_objective': float(vqe_result.eigenvalue.real + offset),
+        'vqe_solution': x_vqe.tolist(),
+        'vqe_solution_objective': float(qp.objective.evaluate(x_vqe)),
+        'timestamp': timestamp
+    }
 
-def transpile_backend(vqe):
-    service = QiskitRuntimeService(channel="ibm_quantum") # or your preferred channel
+    return vqe, params
+
+def transpile_backend(vqe, args, params):
+    QiskitRuntimeService.save_account(token="ADD IBM QUANTUM API TOKEN HERE", overwrite=True, channel="ibm_quantum")
+
+    service = QiskitRuntimeService(channel="ibm_quantum")
     circuit = vqe.ansatz
-    # Initialize IBM Provider
-    #IBMProvider.save_account(token='fill your token')
-    # Get the backend (replace 'ibm_torino' with the correct backend name if needed)
     coupling_map = backend.configuration().coupling_map
 
-    # Generate the optimization level 3 pass manager for local test
-    # pm = generate_preset_pass_manager(3, backend)
-    # Transpile the circuit using the pass manager
     transpiled_circuit = transpile(circuit, backend=backend)
-    # Count CZ gates in the transpiled circuit
     cz_count = transpiled_circuit.count_ops().get('cz', 0)
-    # Update VQE ansatz and run
     vqe._ansatz = transpiled_circuit
-    # result = vqe.compute_minimum_eigenvalue(qubitOp)
     print("CZ gate count (after transpilation):", cz_count)
-    # Draw the transpiled circuit (optional)
     transpiled_circuit.draw('mpl', idle_wires=False)
+    
+    timestamp = params['timestamp']
+    transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'transpiled_circuit_{timestamp}.png'))
 
-    # Save the transpiled circuit to a file
+    params['cz_gate_count'] = cz_count
+
+    with open(os.path.join(args.outPath, f'parameters_{timestamp}.yaml'), 'w') as f:
+        yaml.safe_dump(params, f)
 
 if __name__ == "__main__":
-    args=get_parser()
-    # change to name based on reading the config file
-    #reading  => Faketorino
-    # current we hard coded
+    args = get_parser()
     backend = FakeTorino()
 
     if args.proName == 'maxcut':
-        vqe = compute_max_cut(args)
-        # save output in the sub directory
-        transpile_backend(vqe)
-        
-        
-    
+        vqe, params = compute_max_cut(args)
+        transpile_backend(vqe, args, params)
