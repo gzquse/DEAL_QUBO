@@ -4,6 +4,7 @@ import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
 from PlotterBackbone import PlotterBackbone
 import datetime
+import yaml
 from openqaoa import QAOA
 from openqaoa.problems import Knapsack
 import numpy as np
@@ -30,6 +31,8 @@ def get_parser():
     parser.add_argument("--proName",  default='knapsack', help='problem name')
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
+    parser.add_argument("-i", "--iterate", type=int, default=10, help="Number of iterations for benchmarking")
+
     args = parser.parse_args()
     # make arguments  more flexible
     
@@ -249,6 +252,8 @@ def benchmark(args, method):
         # "objective_value": objective_value,
         # "constraint_satisfied": total_weight <= capacity,
     }
+
+'''
 if __name__ == "__main__":
   
     args=get_parser()
@@ -265,3 +270,26 @@ if __name__ == "__main__":
             # print(f"  Objective Value: {r['objective_value']}")
             # print(f"  Constraint Satisfied: {r['constraint_satisfied']}")
             print()
+
+'''
+if __name__ == "__main__":
+    args = get_parser()
+    method = args.penMed
+    num_iterations = args.iterate
+    results = []
+
+    for i in range(num_iterations):
+        print(f"Running iteration {i+1}/{num_iterations}...")
+        res = benchmark(args, method)
+        results.append(res)
+
+    # Generate a filename based on method, simulator, and timestamp
+    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"benchmark_results_{method}_{args.simName}_{current_time}.yaml"
+
+    # Save results to a YAML file
+    with open(filename, "w") as file:
+        yaml.dump(results, file)
+
+    print(f"Results stored in {filename}")
+
