@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
+
+# basic packages
 import argparse
-import os, sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
-from PlotterBackbone import PlotterBackbone
+import os, sys, hashlib
+import itertools
+import numpy as np
+from typing import List, Union
 import datetime
 import yaml
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
+from PlotterBackbone import PlotterBackbone
+
+# QUBO packages
 from openqaoa import QAOA
 from openqaoa.problems import Knapsack
 import numpy as np
@@ -27,19 +34,21 @@ def get_parser():
 
     parser.add_argument("-p", "--showPlots",  default='b', nargs='+',help="abc-string listing shown plots")
     parser.add_argument("-m", "--penMed", choices=["X", "X2", "hybrid"], default="hybrid",help='hamiltonian method')
-    parser.add_argument("--outPath",default='out/',help="all outputs from experiment")
-    parser.add_argument("--proName",  default='knapsack', help='problem name')
+
+    parser.add_argument("--prjName",  default='knapsack', help='problem name')
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
-    parser.add_argument("-i", "--iterate", type=int, default=10, help="Number of iterations for benchmarking")
+    parser.add_argument("-i", "--iterate", type=int, default=1, help="Number of iterations for benchmarking")
+
+    # IO paths
+    parser.add_argument("--basePath",default=None,help="head path for set of experiments, or 'env'")
+    parser.add_argument("--outPath",default='out/',help="(optional) redirect all outputs ")
 
     args = parser.parse_args()
     # make arguments  more flexible
     
     for arg in vars(args):  print( 'myArg:',arg, getattr(args, arg))
     assert os.path.exists(args.outPath)
-    args.showPlots=''.join(args.showPlots)
-
     return args
 
 # Knapsack Problem Parameters
@@ -59,11 +68,6 @@ grid_width = 2  # Required for grid topology
 objective_terms = [PauliOp('Z', [i]) for i in range(n)]
 coefficients = [-values[i] for i in range(n)]  # Negative because OpenQAOA minimizes
 objective_hamiltonian = Hamiltonian(objective_terms, coefficients, constant=0.0)
-
-import itertools
-import numpy as np
-from typing import List, Union
-from openqaoa.qaoa_components import PauliOp, Hamiltonian
 
 def adaptive_xy_hybrid_mixer(
     weights: List[float], 
@@ -161,7 +165,50 @@ def adaptive_xy_hybrid_mixer(
     # Construct and return the Hamiltonian
     return Hamiltonian(pauli_terms, coefficients, constant=0.0)
 
+#............................
+class Plotter(PlotterBackbone):
+    def __init__(self, args):
+        PlotterBackbone.__init__(self,args)
 
+    def benchmark(self, args, MD, figId=1):
+        """
+        Benchmark a specific method for solving the knapsack problem.
+
+        Returns
+        -------
+        result : dict
+            Results of the QAOA run, including bitstring and objective value.
+        """
+        # Define the QAOA problem
+        nrow,ncol=1,1       
+        figId=self.smart_append(figId)
+        # fig=self.plt.figure(figId,facecolor='white',figsize=(5.5,7))        
+        ax = self.plt.subplot(nrow,ncol,1)
+        # TODO plot problem 
+        method = MD['method']
+        _hashlib = MD['hash']
+        if args.simName == "classic":
+            energy, configuration = ground_state_hamiltonian(objective_hamiltonian)
+            # print(f"Ground State energy: {energy}, Solution: {configuration}")
+            method = "classic"
+            result = {"energy": energy, "configuration": configuration}
+        # qaoa.compile()
+        # Run QAOA
+        else:
+            qaoa = define_qaoa_problem(args, method)
+            qaoa.optimize()
+            # result = qaoa.get_results()
+            result = qaoa.qaoa_result.most_probable_states
+            opt_results = qaoa.qaoa_result
+            # print the cost history
+            fig, ax = opt_results.plot_cost()
+            fig.savefig(f"{args.outPath}cost_history_{method}_{_hashlib}.png")
+        return {
+        "method": method,
+        "result": result,
+        # "objective_value": objective_value,
+        # "constraint_satisfied": total_weight <= capacity,
+    }
 def define_qaoa_problem(args, method):
     """
     Define the QAOA Hamiltonian based on the selected penalty method.
@@ -209,34 +256,7 @@ def define_qaoa_problem(args, method):
                                                           'maxiter': 100})
 
     return optimizer
-
-def benchmark(args, method):
-    """
-    Benchmark a specific method for solving the knapsack problem.
-
-    Returns
-    -------
-    result : dict
-        Results of the QAOA run, including bitstring and objective value.
-    """
-    # Define the QAOA problem
-    if args.simName == "classic":
-        energy, configuration = ground_state_hamiltonian(objective_hamiltonian)
-        # print(f"Ground State energy: {energy}, Solution: {configuration}")
-        method = "classic"
-        result = {"energy": energy, "configuration": configuration}
-    # qaoa.compile()
-    # Run QAOA
-    else:
-        qaoa = define_qaoa_problem(args, method)
-        qaoa.optimize()
-        # result = qaoa.get_results()
-        result = qaoa.qaoa_result.most_probable_states
-        opt_results = qaoa.qaoa_result
-        # print the cost history
-        fig, ax = opt_results.plot_cost()
-        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        fig.savefig(f"out/cost_history_{method}_{current_time}.png")
+            
     # Analyze the solution
     # bitstring = result["solutions_bitstrings"]
     # objective_value = sum(
@@ -246,50 +266,31 @@ def benchmark(args, method):
     #     bitstring[i] * weights[i] for i in range(len(bitstring))
     # )  # Total weight
     
-    return {
-        "method": method,
-        "result": result,
-        # "objective_value": objective_value,
-        # "constraint_satisfied": total_weight <= capacity,
-    }
+    
 
-'''
-if __name__ == "__main__":
-  
-    args=get_parser()
-    method = args.penMed
-    results = []
-    res = benchmark(args,method)
-    results.append(res)
-    if args.verb > 0:
-        # Print Results
-        for r in results:
-            print(f"Method: {r['method']}")
-            print(f"  Result: {r['result']}")
-            # print(f"  Optimal Bitstring: {r['bitstring']}")
-            # print(f"  Objective Value: {r['objective_value']}")
-            # print(f"  Constraint Satisfied: {r['constraint_satisfied']}")
-            print()
-
-'''
 if __name__ == "__main__":
     args = get_parser()
     method = args.penMed
     num_iterations = args.iterate
+    _hashlib = hashlib.md5(os.urandom(32)).hexdigest()[:6]
+    MD={
+        'method': method,
+        'hash': _hashlib
+    }
     results = []
-
+    plot = Plotter(args)
+    outPath = args.outPath
     for i in range(num_iterations):
         print(f"Running iteration {i+1}/{num_iterations}...")
-        res = benchmark(args, method)
+        res = plot.benchmark(args, MD)
+        res["iteration"] = i+1
         results.append(res)
-
     # Generate a filename based on method, simulator, and timestamp
-    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"benchmark_results_{method}_{args.simName}_{current_time}.yaml"
+    filename = f"benchmark_results_{method}_{args.simName}_{_hashlib}.yaml"
 
     # Save results to a YAML file
-    with open(filename, "w") as file:
+    with open(outPath+filename, "w") as file:
         yaml.dump(results, file)
 
-    print(f"Results stored in {filename}")
-
+    print(f"Results stored in {outPath+filename}")
+    # plot.display_all(png=1)
