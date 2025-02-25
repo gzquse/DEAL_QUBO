@@ -37,7 +37,7 @@ def get_parser():
 
     parser.add_argument("--prjName",  default='knapsack', help='problem name')
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
-    parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
+    parser.add_argument("-j", "--jobID",  default=os.getenv("SLURM_JOB_ID", ""),help='(optional) jobID assigned during submission')
     parser.add_argument("-i", "--iterate", type=int, default=1, help="Number of iterations for benchmarking")
 
     # IO paths
