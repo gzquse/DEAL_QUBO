@@ -4,3 +4,5 @@ matplotlib
 networkx
 qiskit_optimization
 pylatexenc
+pyyaml
+qiskit-aer
