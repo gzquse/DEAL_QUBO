@@ -61,23 +61,28 @@ class Plotter(PlotterBackbone):
 
     def compute_max_cut(self, args, MD):
         # Generating a graph of 4 nodes
-        n = 4  # Number of nodes in graph
-        G = nx.Graph()
-        G.add_nodes_from(np.arange(0, n, 1))
-        elist = [(0, 1, 1.0), (0, 2, 1.0), (0, 3, 1.0), (1, 2, 1.0), (2, 3, 1.0)]
-        G.add_weighted_edges_from(elist)
+        # Parameters
+        n = 4  # Number of nodes
+        p = 0.2  # Probability of edge creation (sparse graph)
 
-        colors = ["r" for node in G.nodes()]
-        pos = nx.spring_layout(G)
+        # Generate a sparse Erdős–Rényi graph G(n, p)
+        G = nx.erdos_renyi_graph(n, p)
 
-        # Computing the weight matrix from the random graph
-        w = np.zeros([n, n])
-        for i in range(n):
-            for j in range(n):
-                temp = G.get_edge_data(i, j, default=0)
-                if temp != 0:
-                    w[i, j] = temp["weight"]
-        print(w)
+        # Assign random weights to edges
+        for u, v in G.edges():
+            G[u][v]['weight'] = np.random.uniform(0.5, 2.0)  # Weights between 0.5 and 2.0
+
+        # Compute weight matrix
+        w = np.zeros((n, n))
+        for i, j, data in G.edges(data=True):
+            w[i, j] = data["weight"]
+            w[j, i] = data["weight"]  # Since it's an undirected graph
+
+        # Visualizing the Graph
+        pos = nx.spring_layout(G)  # Layout for visualization
+        edges = [(u, v) for u, v in G.edges()]
+        weights = [G[u][v]['weight'] for u, v in edges]
+        print(weights)
 
         max_cut = Maxcut(w)
         qp = max_cut.to_quadratic_program()
@@ -162,7 +167,7 @@ def transpile_backend(vqe, args, params):
     cz_count = transpiled_circuit.count_ops().get('cz', 0)
     vqe._ansatz = transpiled_circuit
     print("CZ gate count (after transpilation):", cz_count)
-    
+    print('SX gate count (after transpilation):', transpiled_circuit.count_ops().get('sx', 0))
     _hashlib = params['_hashlib']
     transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'transpiled_circuit_{_hashlib}.png'))
 
