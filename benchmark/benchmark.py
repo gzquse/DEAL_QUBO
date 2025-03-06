@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: Ziqing Guo
+@contact:
+@project: QAOA
+
+@version: 0.1
+
+@description:
+for optimier:
+Gradient-free optimizers: nelder-mead, powell, cg, bfgs, tnc, cobyla, slsqp, trust-constr, dogleg, trust-ncg, trust-exact, and trust-krylov.
+
+Gradient-based optimizers: vgd, newton, rmsprop, natural_grad_descent, spsa, l-bfgs-b, and newton-cg.
+
+PennyLane optimizers: pennylane_adagrad, pennylane_adam, pennylane_vgd, pennylane_momentum, pennylane_nesterov_momentum, pennylane_rmsprop, pennylane_rotosolve, and pennylane_spsa.
+
+Shot adaptive optimizers: cans, and icans
+"""
 
 # basic packages
 import argparse
@@ -10,7 +28,7 @@ import datetime
 import yaml
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
 from PlotterBackbone import PlotterBackbone
-from Util_problems import KP
+from Util_problems import KP, TSP, MAXCUT, normalization
 from docplex.mp.model import Model
 from qiskit import qpy
 
@@ -27,6 +45,8 @@ from openqaoa.optimizers import get_optimizer
 from openqaoa.utilities import X_mixer_hamiltonian
 from openqaoa.backends.qaoa_backend import get_qaoa_backend
 from openqaoa.utilities import ground_state_hamiltonian
+from openqaoa.problems.converters import FromDocplex2IsingModel
+import networkx as nx
 
 #...!...!..................
 def get_parser():
@@ -37,13 +57,13 @@ def get_parser():
     parser.add_argument("-p", "--showPlots",  default='b', nargs='+',help="abc-string listing shown plots")
     parser.add_argument("-m", "--penMed", choices=["X", "X2", "hybrid"], default="hybrid",help='hamiltonian method')
 
-    parser.add_argument("--prjName",  default='knapsack', help='problem name')
+    parser.add_argument("--prjName",  choices=["kp", "maxcut", "tsp"], default='kp', help='problem name')
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=os.getenv("SLURM_JOB_ID", ""),help='(optional) jobID assigned during submission')
     parser.add_argument("-i", "--iterate", type=int, default=1, help="Number of iterations for benchmarking")
 
     # for backend
-    parser.add_argument("--nShots", type=int, default=100, help="Number of shots for the simulator")
+    parser.add_argument("--nShots", type=int, default=400, help="Number of shots for the simulator")
     parser.add_argument("--opt", default='pennylane_adam', help="optimizer")
 
     # IO paths
@@ -57,13 +77,9 @@ def get_parser():
     assert os.path.exists(args.outPath)
     return args
 
-# Knapsack Problem Parameters
-n = 4  # Number of variables
-values = [3, 11, 14, 19, 5]
-weights = [3, 11, 14, 19, 5]
-capacity = 26
-
-
+##############################
+#  setting for training 
+##############################
 penalty_strength = 1  # Penalty multiplier for all methods
 connectivity = "full"  # Using a 2D lattice
 idle_qubits = []  # idle qubits
@@ -73,10 +89,73 @@ coeffs = [1.0, 1.0, 0.5]
 constant = 0.0
 grid_width = 2  # Required for grid topology
 
-objective_terms = [PauliOp('Z', [i]) for i in range(n)]
-coefficients = [-values[i] for i in range(n)]  # Negative because OpenQAOA minimizes
-objective_hamiltonian = Hamiltonian(objective_terms, coefficients, constant=0.0)
+##############################
+#  get objective hamiltonian 
+##############################
+# setting for penalty strength
+lambda0 = 1
+lambda1 = 0
+lambda2 = 0
 
+def get_model(problem: str, **kwargs) -> Model:
+    """
+    Get the objective Hamiltonian for a given problem.
+
+    Parameters
+    ----------
+    problem : str
+        Name of the problem to solve.
+
+    Returns
+    -------
+    Hamiltonian
+        Objective Hamiltonian for the problem.
+    """
+    if problem == "kp":
+        # Define the QUBO terms and coefficients
+        # Knapsack Problem Parameters
+        MD = {
+            "n": 5,  # Number of variables
+            "values": [8, 47, 10, 5, 16],
+            "weights": [3, 11, 14, 19, 5],
+            "capacity": 26,
+        }
+        lambda1 = 0.9603 
+        lambda2 = 0.0371
+        return KP(MD["values"], MD["weights"], MD["capacity"]), MD
+
+    elif problem == "maxcut":
+        # Define the Max Cut problem
+        G = nx.Graph()
+        G.add_edges_from([(0, 1), (0, 2), (0, 3), (1, 2), (2, 3)])
+        for i, j in G.edges():
+            G[i][j]['weight'] = np.random.uniform(0.5, 2.0)  # Random edge weights
+        return MAXCUT(G)
+
+    elif problem == "tsp":
+        lambda0 = 38.2584  
+        lambda1 = 18.2838
+        lambda2 = 57.0375
+        # Define the TSP problem
+        MD = {
+            'lx': 50, 
+            'ly': 50,   # The grid size where the points will be selected randomly
+            'seed': 5,
+            'cities': 5
+        }
+        np.random.seed(MD['seed'])
+        positions = {i: np.random.randint(0, [MD['lx'], MD['ly']], 2) for i in range(MD['cities'])}
+        G = nx.Graph()
+        G.add_nodes_from(range(MD["cities"]))
+        for i in range(MD["cities"]):
+            for j in range(MD["cities"]):
+                if i != j:
+                    rij = np.sqrt(np.sum((positions[i] - positions[j]) ** 2))
+                    G.add_weighted_edges_from([[i, j, rij]])
+        return TSP(G), MD
+    else:
+        raise ValueError(f"Invalid problem: {problem}")
+    
 def adaptive_xy_hybrid_mixer(
     weights: List[float], 
     capacity: float, 
@@ -184,6 +263,10 @@ def define_qaoa_problem(args, method):
     """
     # Objective Hamiltonian (maximize value)
     method = args.penMed
+    model, MD = get_model(args.prjName)
+    weights = MD.get("weights", [3, 11, 14, 19, 5])
+    capacity = 26
+    n = MD.get("n", 5)
     # Constraint Hamiltonian
     if method == "X":
         # Add slack variables explicitly as qubits
@@ -210,10 +293,13 @@ def define_qaoa_problem(args, method):
 
     # Create QAOA instance
     # qaoa = QAOA()
+    norm_model = normalization(FromDocplex2IsingModel(model, multipliers=lambda0, unbalanced_const=True,
+                                         strength_ineq=[lambda2/lambda0, lambda1/lambda0]).ising_model) 
+    objective_hamiltonian = norm_model.hamiltonian
     device_local = create_device(location='local', name=args.simName)
     qaoa_descriptor = QAOADescriptor(cost_hamiltonian = objective_hamiltonian, mixer_block = mix_hamiltonian, p=1)
     
-    backend_local = get_qaoa_backend(qaoa_descriptor, device_local, n_shots=400)
+    backend_local = get_qaoa_backend(qaoa_descriptor, device_local, n_shots=args.nShots)
     #To create a Variational Parameter Class with the Standard Parameterisation and Random Initialisation
     variate_params = create_qaoa_variational_params(qaoa_descriptor = qaoa_descriptor, params_type = 'standard', init_type = 'rand')
     optimizer = get_optimizer(backend_local, variate_params, {
