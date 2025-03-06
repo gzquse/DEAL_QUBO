@@ -308,7 +308,7 @@ def define_qaoa_problem(args, method):
         'optimizer_options': dict(stepsize=0.01, beta1=0.9, beta2=0.99, eps=1e-08),
         'maxiter': 100})
 
-    return optimizer, backend_local
+    return optimizer, backend_local, objective_hamiltonian
 
 #............................
 class Plotter(PlotterBackbone):
@@ -332,6 +332,7 @@ class Plotter(PlotterBackbone):
         # TODO plot problem 
         method = MD['method']
         _hashlib = MD['hash']
+        qaoa, backend, objective_hamiltonian = define_qaoa_problem(args, method)
         if args.simName == "classic":
             energy, configuration = ground_state_hamiltonian(objective_hamiltonian)
             # print(f"Ground State energy: {energy}, Solution: {configuration}")
@@ -340,9 +341,7 @@ class Plotter(PlotterBackbone):
         # qaoa.compile()
         # Run QAOA
         else:
-            qaoa, backend = define_qaoa_problem(args, method)
             # saving circuit 
-            
             qaoa.optimize()
             # result = qaoa.get_results()
             result = qaoa.qaoa_result.most_probable_states
@@ -350,7 +349,6 @@ class Plotter(PlotterBackbone):
             # print the cost history
             fig, ax = opt_results.plot_cost()
             fig.savefig(f"{args.outPath}cost_history_{method}_{_hashlib}.png")
-
             # saving circuits
             variational_params = qaoa.variational_params
             optimized_angles = opt_results.optimized['angles']

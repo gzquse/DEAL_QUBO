@@ -24,7 +24,7 @@ from qiskit.transpiler import CouplingMap, Layout
 from qiskit_ibm_runtime.fake_provider import FakeTorino, FakeFez, FakeMarrakesh
 # from qiskit_ibm_runtime.fake_provider import FakeFez, FakeMarrakesh
 from qiskit.visualization import plot_histogram
-from qiskit_ibm_runtime import SamplerV2
+from qiskit_ibm_runtime import SamplerV2 as Sampler
 from qiskit import qpy
 from datetime import datetime
 
@@ -37,15 +37,20 @@ def get_parser():
     parser.add_argument("-m", "--penMed", choices=["X", "X2", "hybrid"], default="hybrid",help='hamiltonian method')
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
+    parser.add_argument("-b", "--backend", default='', help='ibm backend')
+    parser.add_argument("--numShots", type=int, default=1024, help='number of shots')
+    parser.add_argument("--opt", type=int, default=1, help="optimization level")
     parser.add_argument("--outPath",default='out/',help="all outputs from experiment")
-    parser.add_argument("--infPath",default='circ/',help="all inputs from experiment")
+    parser.add_argument("--infPath",default='',help="all inputs from experiment")
     parser.add_argument("--prjName",  default='maxcut', help='problem name')
-    parser.add_argument("--dryRun", default=True, action='store_true', help='dry run')
+    parser.add_argument("--dryRun", action='store_true', help='dry run')
     args = parser.parse_args()
     
     for arg in vars(args):  print( 'myArg:',arg, getattr(args, arg))
     assert os.path.exists(args.outPath)
     args.showPlots=''.join(args.showPlots)
+    if args.prjName == 'qpy':
+        assert args.infPath
     return args
 
 # Read backend configuration from the YAML file
@@ -158,67 +163,97 @@ class Plotter(PlotterBackbone):
             'vqe_solution': x_vqe.tolist(),
             'vqe_solution_objective': float(qp.objective.evaluate(x_vqe)),
             '_hashlib': MD['_hashlib'],
+            'backend_name': MD['backend_name'],
         }
 
         return vqe, params
 
 def transpile_backend(vqe, args, params):
-
-    service = QiskitRuntimeService(channel="ibm_quantum")
+    
+    # Dynamically load the backend class using the name from the config
+    backend = getattr(sys.modules[__name__], params['backend_name'])()
     circuit = vqe.ansatz
-    coupling_map = backend.configuration().coupling_map
+    circuit.metadata = {'backend': params['backend_name']}
     transpiled_circuit = transpile(circuit, backend=backend)
     cz_count = transpiled_circuit.count_ops().get('cz', 0)
     vqe._ansatz = transpiled_circuit
     print("CZ gate count (after transpilation):", cz_count)
     print('SX gate count (after transpilation):', transpiled_circuit.count_ops().get('sx', 0))
     _hashlib = params['_hashlib']
+    backend_name = params['backend_name']
     transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'transpiled_circuit_{_hashlib}.png'))
 
     params['cz_gate_count'] = cz_count
-
-    with open(os.path.join(args.outPath, f'parameters_{_hashlib}.yaml'), 'w') as f:
+    with open(os.path.join(args.outPath, f'IBM_{backend_name}_{_hashlib}.yaml'), 'w') as f:
         yaml.safe_dump(params, f)
 
 def transpile_from_qpy(inf, params):
     with open(inf, 'rb') as fd:
         circuits = qpy.load(fd)
     circ = circuits[0]
-    # only get one circuit at the same time
-    transpiled_circuit = transpile(circ, backend=backend)
-    cz_count = transpiled_circuit.count_ops().get('cz', 0)
-    circ._ansatz = transpiled_circuit
-    print("CZ gate count (after transpilation):", cz_count)
-    print('SX gate count (after transpilation):', transpiled_circuit.count_ops().get('sx', 0))
+    circ.measure_all()
+    if args.verb > 1:
+        print(circ)
     _hashlib = params['_hashlib']
-    transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'{backend_name}_{_hashlib}.png'))
-
-    params['cz_gate_count'] = cz_count
-
+    # submit the job to the cloud
     if not args.dryRun:
-        # Run the transpiled circuit using the simulated fake backend
-        sampler = SamplerV2(backend)
-        job = sampler.run([transpiled_circuit])
-        pub_result = job.result()[0]
-        counts = pub_result.data.meas.get_counts()
-        plot_histogram(counts)
-    
+        # export QISKIT_IBM_TOKEN="MY_IBM_CLOUD_API_KEY"
+        service = QiskitRuntimeService(channel="ibm_quantum")
+        # 2: Optimize problem for quantum execution.
+        backend = service.least_busy(operational=True, simulator=False)
+        circ.metadata = {'backend': backend.name}
+        pm = generate_preset_pass_manager(backend=backend, optimization_level=args.opt)
+        isa_circuit = pm.run(circ)
+        # 3. Execute using the Sampler primitive
+        sampler = Sampler(mode=backend)
+        sampler.options.default_shots = args.numShots  # Options can be set using auto-complete.
+        job = sampler.run([isa_circuit])
+        print(f"Job checking on IBM: https://quantum.ibm.com/jobs/{job.job_id()}")
+        params['job_id'] = job.job_id()
+        args.backend = backend.name
+        print(f'./np_backends.py  --prjName plot --jobID {job.job_id()} --backend {args.backend}')
+    else:
+        # only get one circuit at the same time
+        backend = getattr(sys.modules[__name__], params['backend_name'])()
+        transpiled_circuit = transpile(circ, backend=backend)
+        cz_count = transpiled_circuit.count_ops().get('cz', 0)
+        circ._ansatz = transpiled_circuit
+        print("CZ gate count (after transpilation):", cz_count)
+        print('SX gate count (after transpilation):', transpiled_circuit.count_ops().get('sx', 0))
+        backend_name = params['backend_name']
+        transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'{backend_name}_{_hashlib}.png'))
+        params['cz_gate_count'] = cz_count
     with open(os.path.join(args.outPath, f'parameters_{_hashlib}.yaml'), 'w') as f:
         yaml.safe_dump(params, f)
+
+def get_results(jb_id):
+    service = QiskitRuntimeService(
+    channel='ibm_quantum',
+    instance='ibm-q/open/main',
+    )
+    job = service.job(jb_id)
+    if job.status() == 'DONE':
+        counts = job.result()[0].data.meas.get_counts()
+        path = args.outPath+args.backend+'_'+str(args.numShots)+'_bitstrings.pdf'
+        his = plot_histogram(counts, sort='value_desc', figsize=(5, 7.5), filename=path)
+        print('bitstrings saved to', path)
+    else:
+        pass
+        print(job.status())
 
 if __name__ == "__main__":
     args = get_parser()
     MD = {}
-    _hashlib = hashlib.md5(os.urandom(32)).hexdigest()[:6]
-    MD['_hashlib'] = _hashlib
-    plot = Plotter(args)
-    # backend = FakeTorino()
     # Read the backend name from config file
     backend_name = read_config()
-    # Dynamically load the backend class using the name from the config
-    backend = getattr(sys.modules[__name__], backend_name)()
+    _hashlib = hashlib.md5(os.urandom(32)).hexdigest()[:6]
+    MD['_hashlib'] = _hashlib
+    MD['backend_name'] = backend_name
+    plot = Plotter(args)
     if args.prjName == 'maxcut':
         vqe, params = plot.compute_max_cut(args, MD)
         transpile_backend(vqe, args, params)
     elif args.prjName == 'qpy':
         transpile_from_qpy(args.infPath, MD)
+    elif args.prjName == 'plot':
+        get_results(args.jobID)
