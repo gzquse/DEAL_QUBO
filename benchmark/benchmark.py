@@ -141,7 +141,7 @@ def get_model(problem: str, **kwargs) -> Model:
             'lx': 50, 
             'ly': 50,   # The grid size where the points will be selected randomly
             'seed': 5,
-            'cities': 5
+            'cities': 4
         }
         np.random.seed(MD['seed'])
         positions = {i: np.random.randint(0, [MD['lx'], MD['ly']], 2) for i in range(MD['cities'])}
