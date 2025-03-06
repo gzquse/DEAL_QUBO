@@ -25,13 +25,25 @@
 OIFS="$IFS"
 IFS=$'\n'
 
-#Load the Bioinformatics conda environment.
+#Load the Bioinformatics conda environment. 
+# running everything with qaoa
 . $HOME/conda/etc/profile.d/conda.sh
 conda activate qaoa
 
 #Delete the executable then re-compile the source code.
 echo -e "\n\nBenchmarking crosstalking 1.\n"
-python ./benchmark/benchmark.py -m hybrid -i 10
+## get the runout 
+LAST_LINE=$(python ./benchmark.py  -m hybrid -s qiskit.statevector_simulator -i 10 -v 0 | tail -n 1)
+echo "The last line of Python output is: $LAST_LINE"
+conda deactivate qaoa
+# conda activate /pscratch/sd/g/gzquse/qaoa
+# running backends with latest qiskit
+conda activate qiskit 
+LAST_LINE
+###TODO
+# get the output from previous python run last line
+
+
 #Return the field separator to its original value and deactivate conda.
 IFS="$OIFS"
 conda deactivate

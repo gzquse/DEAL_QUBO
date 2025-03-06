@@ -21,8 +21,11 @@ from qiskit_aer.primitives import Sampler as AerSampler
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit.transpiler import CouplingMap, Layout
-from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit_ibm_runtime.fake_provider import FakeTorino, FakeFez, FakeMarrakesh
+# from qiskit_ibm_runtime.fake_provider import FakeFez, FakeMarrakesh
+from qiskit.visualization import plot_histogram
+from qiskit_ibm_runtime import SamplerV2
+from qiskit import qpy
 from datetime import datetime
 
 #...!...!..................
@@ -35,7 +38,9 @@ def get_parser():
     parser.add_argument("-s", "--simName", choices=["qiskit.statevector_simulator", "qiskit.shot_simulator", "classic"], default='qiskit.statevector_simulator', help='simulators')
     parser.add_argument("-j", "--jobID",  default=None,help='(optional) jobID assigned during submission')
     parser.add_argument("--outPath",default='out/',help="all outputs from experiment")
+    parser.add_argument("--infPath",default='circ/',help="all inputs from experiment")
     parser.add_argument("--prjName",  default='maxcut', help='problem name')
+    parser.add_argument("--dryRun", default=True, action='store_true', help='dry run')
     args = parser.parse_args()
     
     for arg in vars(args):  print( 'myArg:',arg, getattr(args, arg))
@@ -162,7 +167,6 @@ def transpile_backend(vqe, args, params):
     service = QiskitRuntimeService(channel="ibm_quantum")
     circuit = vqe.ansatz
     coupling_map = backend.configuration().coupling_map
-
     transpiled_circuit = transpile(circuit, backend=backend)
     cz_count = transpiled_circuit.count_ops().get('cz', 0)
     vqe._ansatz = transpiled_circuit
@@ -173,6 +177,32 @@ def transpile_backend(vqe, args, params):
 
     params['cz_gate_count'] = cz_count
 
+    with open(os.path.join(args.outPath, f'parameters_{_hashlib}.yaml'), 'w') as f:
+        yaml.safe_dump(params, f)
+
+def transpile_from_qpy(inf, params):
+    with open(inf, 'rb') as fd:
+        circuits = qpy.load(fd)
+    circ = circuits[0]
+    # only get one circuit at the same time
+    transpiled_circuit = transpile(circ, backend=backend)
+    cz_count = transpiled_circuit.count_ops().get('cz', 0)
+    circ._ansatz = transpiled_circuit
+    print("CZ gate count (after transpilation):", cz_count)
+    print('SX gate count (after transpilation):', transpiled_circuit.count_ops().get('sx', 0))
+    _hashlib = params['_hashlib']
+    transpiled_circuit.draw('mpl', idle_wires=False, filename=os.path.join(args.outPath, f'{backend_name}_{_hashlib}.png'))
+
+    params['cz_gate_count'] = cz_count
+
+    if not args.dryRun:
+        # Run the transpiled circuit using the simulated fake backend
+        sampler = SamplerV2(backend)
+        job = sampler.run([transpiled_circuit])
+        pub_result = job.result()[0]
+        counts = pub_result.data.meas.get_counts()
+        plot_histogram(counts)
+    
     with open(os.path.join(args.outPath, f'parameters_{_hashlib}.yaml'), 'w') as f:
         yaml.safe_dump(params, f)
 
@@ -190,3 +220,5 @@ if __name__ == "__main__":
     if args.prjName == 'maxcut':
         vqe, params = plot.compute_max_cut(args, MD)
         transpile_backend(vqe, args, params)
+    elif args.prjName == 'qpy':
+        transpile_from_qpy(args.infPath, MD)

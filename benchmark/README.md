@@ -1,9 +1,8 @@
-# NERSC setup
-
+# PM setup
 module load conda
+conda activate /pscratch/sd/g/gzquse/qaoa/
 
-conda activate /global/common/software/nintern/gzquse/
-
+conda activate 
 # local conda env
 pip install --user -r .\requirements.txt
 
@@ -16,3 +15,6 @@ dwave setup --auth
 . $HOME/conda/etc/profile.d/conda.sh
 
 conda activate qaoa
+
+# run
+./benchmark.py  -m hybrid -s qiskit.statevector_simulator

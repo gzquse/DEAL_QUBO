@@ -10,10 +10,12 @@ import datetime
 import yaml
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'toolbox')))
 from PlotterBackbone import PlotterBackbone
+from Util_problems import KP
+from docplex.mp.model import Model
+from qiskit import qpy
 
 # QUBO packages
 from openqaoa import QAOA
-from openqaoa.problems import Knapsack
 import numpy as np
 #import method to specify the device
 from openqaoa.backends import create_device
@@ -40,10 +42,14 @@ def get_parser():
     parser.add_argument("-j", "--jobID",  default=os.getenv("SLURM_JOB_ID", ""),help='(optional) jobID assigned during submission')
     parser.add_argument("-i", "--iterate", type=int, default=1, help="Number of iterations for benchmarking")
 
+    # for backend
+    parser.add_argument("--nShots", type=int, default=100, help="Number of shots for the simulator")
+    parser.add_argument("--opt", default='pennylane_adam', help="optimizer")
+
     # IO paths
     parser.add_argument("--basePath",default=None,help="head path for set of experiments, or 'env'")
     parser.add_argument("--outPath",default='out/',help="(optional) redirect all outputs ")
-
+    parser.add_argument("--dryRun", action='store_true', default=False, help="dry run without executing")
     args = parser.parse_args()
     # make arguments  more flexible
     
@@ -53,9 +59,11 @@ def get_parser():
 
 # Knapsack Problem Parameters
 n = 4  # Number of variables
-values = [10, 15, 40, 30]  # Item values
-weights = [2, 3, 5, 7]  # Item weights
-capacity = 10  # Knapsack capacity
+values = [3, 11, 14, 19, 5]
+weights = [3, 11, 14, 19, 5]
+capacity = 26
+
+
 penalty_strength = 1  # Penalty multiplier for all methods
 connectivity = "full"  # Using a 2D lattice
 idle_qubits = []  # idle qubits
@@ -165,50 +173,6 @@ def adaptive_xy_hybrid_mixer(
     # Construct and return the Hamiltonian
     return Hamiltonian(pauli_terms, coefficients, constant=0.0)
 
-#............................
-class Plotter(PlotterBackbone):
-    def __init__(self, args):
-        PlotterBackbone.__init__(self,args)
-
-    def benchmark(self, args, MD, figId=1):
-        """
-        Benchmark a specific method for solving the knapsack problem.
-
-        Returns
-        -------
-        result : dict
-            Results of the QAOA run, including bitstring and objective value.
-        """
-        # Define the QAOA problem
-        nrow,ncol=1,1       
-        figId=self.smart_append(figId)
-        # fig=self.plt.figure(figId,facecolor='white',figsize=(5.5,7))        
-        ax = self.plt.subplot(nrow,ncol,1)
-        # TODO plot problem 
-        method = MD['method']
-        _hashlib = MD['hash']
-        if args.simName == "classic":
-            energy, configuration = ground_state_hamiltonian(objective_hamiltonian)
-            # print(f"Ground State energy: {energy}, Solution: {configuration}")
-            method = "classic"
-            result = {"energy": energy, "configuration": configuration}
-        # qaoa.compile()
-        # Run QAOA
-        else:
-            qaoa = define_qaoa_problem(args, method)
-            qaoa.optimize()
-            # result = qaoa.get_results()
-            result = qaoa.qaoa_result.most_probable_states
-            opt_results = qaoa.qaoa_result
-            # print the cost history
-            fig, ax = opt_results.plot_cost()
-            fig.savefig(f"{args.outPath}cost_history_{method}_{_hashlib}.png")
-        return {
-        "method": method,
-        "result": result,
-        # "objective_value": objective_value,
-        # "constraint_satisfied": total_weight <= capacity,
-    }
 def define_qaoa_problem(args, method):
     """
     Define the QAOA Hamiltonian based on the selected penalty method.
@@ -245,28 +209,79 @@ def define_qaoa_problem(args, method):
                                             )
 
     # Create QAOA instance
-    qaoa = QAOA()
+    # qaoa = QAOA()
     device_local = create_device(location='local', name=args.simName)
     qaoa_descriptor = QAOADescriptor(cost_hamiltonian = objective_hamiltonian, mixer_block = mix_hamiltonian, p=1)
     
     backend_local = get_qaoa_backend(qaoa_descriptor, device_local, n_shots=400)
     #To create a Variational Parameter Class with the Standard Parameterisation and Random Initialisation
     variate_params = create_qaoa_variational_params(qaoa_descriptor = qaoa_descriptor, params_type = 'standard', init_type = 'rand')
-    optimizer = get_optimizer(backend_local, variate_params, {'method': 'cobyla',
-                                                          'maxiter': 100})
+    optimizer = get_optimizer(backend_local, variate_params, {
+        'method': 'pennylane_adam',
+        'jac': "param_shift",
+        'optimizer_options': dict(stepsize=0.01, beta1=0.9, beta2=0.99, eps=1e-08),
+        'maxiter': 100})
 
-    return optimizer
+    return optimizer, backend_local
+
+#............................
+class Plotter(PlotterBackbone):
+    def __init__(self, args):
+        PlotterBackbone.__init__(self,args)
+
+    def benchmark(self, args, MD, figId=1):
+        """
+        Benchmark a specific method for solving the knapsack problem.
+
+        Returns
+        -------
+        result : dict
+            Results of the QAOA run, including bitstring and objective value.
+        """
+        # Define the QAOA problem
+        nrow,ncol=1,1       
+        figId=self.smart_append(figId)
+        # fig=self.plt.figure(figId,facecolor='white',figsize=(5.5,7))        
+        ax = self.plt.subplot(nrow,ncol,1)
+        # TODO plot problem 
+        method = MD['method']
+        _hashlib = MD['hash']
+        if args.simName == "classic":
+            energy, configuration = ground_state_hamiltonian(objective_hamiltonian)
+            # print(f"Ground State energy: {energy}, Solution: {configuration}")
+            method = "classic"
+            result = {"energy": energy, "configuration": configuration}
+        # qaoa.compile()
+        # Run QAOA
+        else:
+            qaoa, backend = define_qaoa_problem(args, method)
+            # saving circuit 
             
-    # Analyze the solution
-    # bitstring = result["solutions_bitstrings"]
-    # objective_value = sum(
-    #     bitstring[i] * values[i] for i in range(len(bitstring))
-    # )  # Objective value
-    # total_weight = sum(
-    #     bitstring[i] * weights[i] for i in range(len(bitstring))
-    # )  # Total weight
-    
-    
+            qaoa.optimize()
+            # result = qaoa.get_results()
+            result = qaoa.qaoa_result.most_probable_states
+            opt_results = qaoa.qaoa_result
+            # print the cost history
+            fig, ax = opt_results.plot_cost()
+            fig.savefig(f"{args.outPath}cost_history_{method}_{_hashlib}.png")
+
+            # saving circuits
+            variational_params = qaoa.variational_params
+            optimized_angles = opt_results.optimized['angles']
+            variational_params.update_from_raw(optimized_angles)
+            optimized_circuit = backend.qaoa_circuit(variational_params)
+            if (args.verb > 1):
+                print(optimized_circuit)
+            with open(MD['qpyPath'], "wb") as fd:
+                qpy.dump(optimized_circuit, fd)
+                print("saved optimized circuit")
+        # print(f"QAOA Result: {result}")   
+        return {
+        "method": method,
+        "result": result,
+        # "objective_value": objective_value,
+        # "constraint_satisfied": total_weight <= capacity,
+        }
 
 if __name__ == "__main__":
     args = get_parser()
@@ -275,7 +290,8 @@ if __name__ == "__main__":
     _hashlib = hashlib.md5(os.urandom(32)).hexdigest()[:6]
     MD={
         'method': method,
-        'hash': _hashlib
+        'hash': _hashlib,
+        'qpyPath': f"circ/{method}_{_hashlib}.qpy"
     }
     results = []
     plot = Plotter(args)
@@ -285,12 +301,15 @@ if __name__ == "__main__":
         res = plot.benchmark(args, MD)
         res["iteration"] = i+1
         results.append(res)
+    results.append({'simulator': args.simName})
     # Generate a filename based on method, simulator, and timestamp
     filename = f"benchmark_results_{method}_{args.simName}_{_hashlib}.yaml"
 
     # Save results to a YAML file
     with open(outPath+filename, "w") as file:
         yaml.dump(results, file)
-
-    print(f"Results stored in {outPath+filename}")
+    print("conda activate qiskit")
+    print("for ziqing: switch from qaoa to latest qiskit")
+    print("conda activate /pscratch/sd/g/gzquse/cudaq")
+    print(f"./np_backends.py  --prjName qpy --infPath {MD['qpyPath']}")
     # plot.display_all(png=1)
