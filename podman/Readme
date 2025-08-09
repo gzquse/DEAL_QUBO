@@ -1,0 +1,15 @@
+
+[qiskitDockerfile.cudaq- ](Dockerfile.nbdev) is used to work on PM
+
+
+Possible method of enabling GPU on MacOS
+https://sinrega.org/2024-03-06-enabling-containers-gpu-macos/
+
+Image compilation on PM, work for Jan & Martin the same way
+
+time  ./podman-hpc-build.sh -f Dockerfile.nbdev -t nbdev:p3
+podman-hpc migrate gzquse/nbdev:p3
+
+IMG=gzquse/nbdev:p3
+podman-hpc run -it --gpu -e DISPLAY  -v $HOME:$HOME -e HOME  $IMG  bash     # start the image
+

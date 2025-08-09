@@ -29,7 +29,6 @@ cp /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.11.8.89 ~/libcudart.so
 
 exit
 
-
 conda deactivate
 
 jupyter notebook

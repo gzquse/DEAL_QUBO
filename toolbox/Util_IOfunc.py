@@ -10,7 +10,7 @@ import csv
 
 #...!...!..................
 def read_yaml(ymlFn,verb=1):
-        if verb: print('  read  yaml:',ymlFn)
+        if verb: print('read yaml:',ymlFn)
         start = time.time()
         ymlFd = open(ymlFn, 'r')
         bulk=yaml.load( ymlFd, Loader=yaml.CLoader)
